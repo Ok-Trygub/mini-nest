@@ -1,7 +1,7 @@
 {
   "name": "mini-nest",
   "version": "1.0.0",
-  "description": "",
+  "description": "Mini IoC container + decorator-based HTTP routing on top of node:http",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Ok-Trygub/mini-nest.git"
@@ -9,23 +9,24 @@
   "license": "ISC",
   "author": "",
   "type": "commonjs",
-  "main": "index.js",
+  "main": "dist/src/server.js",
   "scripts": {
-    "dev": "tsx watch src/server.ts",
+    "clean": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true })\"",
+    "build": "npm run clean && tsc",
+    "start": "node dist/src/server.js",
+    "dev": "npm run build && node --watch dist/src/server.js",
+    "test": "npm run build && node --test \"dist/test/**/*.test.js\"",
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down",
     "docker:logs": "docker compose logs -f",
-    "docker:status": "docker compose ps",
-    "build": "tsc",
-    "test": "npm run build && node --test \"dist/test/**/*.test.js\""
+    "docker:status": "docker compose ps"
   },
   "devDependencies": {
-    "@types/express": "^5.0.6",
     "@types/node": "^26.2.0",
     "typescript": "^6.0.3"
   },
   "dependencies": {
-    "express": "^5.2.1",
-    "reflect-metadata": "^0.2.2"
+    "reflect-metadata": "^0.2.2",
+    "zod": "^4.4.3"
   }
 }
