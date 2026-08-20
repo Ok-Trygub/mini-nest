@@ -1,13 +1,13 @@
 # mini-nest
 
-Власний mini-Nest: IoC-контейнер, який читає метадані типів із конструктора і сам збирає граф залежностей, плюс маршрутизація на декораторах і валідація вхідних даних поверх `node:http`.
+A hand-written mini-Nest: an IoC container that reads constructor type metadata and assembles the dependency graph itself, plus decorator-based routing and request validation on top of `node:http`.
 
-- Частина 1 з 3 — Лекція 6, IoC-контейнер.
-- Частина 2 з 3 — Лекція 7, HTTP-шар.
+- Part 1 of 3 — lecture 6, the IoC container.
+- Part 2 of 3 — lecture 7, the HTTP layer.
 
-Жодних сторонніх HTTP-фреймворків: маршрутизація власна, поверх `node:http`. Рантайм-залежність рівно одна — `reflect-metadata`. Тести — вбудований раннер Node.
+No third-party HTTP framework: the routing is our own, straight on `node:http`. Exactly one runtime dependency, `reflect-metadata`. Tests run on the built-in Node runner.
 
-## Запуск
+## Getting started
 
 ```sh
 npm ci
@@ -22,100 +22,53 @@ npm start
 docker compose run --rm api npm test
 ```
 
-## Маршрути
+## Routes
 
-| Метод і шлях | Що робить |
+| Method and path | What it does |
 | --- | --- |
-| `GET /health` | `{"status":"ok"}` для healthcheck у Docker |
-| `GET /users?limit=n` | список; `limit` доходить у метод числом |
-| `GET /users/:id` | користувач за id, або `404` |
-| `POST /users` | створює користувача, `201`; невалідне тіло дає `400` зі списком полів |
+| `GET /health` | `{"status":"ok"}`, used by the Docker healthcheck |
+| `GET /users?limit=n` | the list; `limit` reaches the handler as a number |
+| `GET /users/:id` | one user by id, or `404` |
+| `POST /users` | creates a user and answers `201`; an invalid body answers `400` with the failing fields |
 
-Сховище в пам'яті й на старті порожнє.
+## How a parameter decorator knows where to substitute a value
 
-```sh
-curl -s -X POST http://127.0.0.1:3000/users -H 'content-type: application/json' -d '{"name":"Ada","email":"ada@example.com","age":36}'
-```
+A parameter decorator pulls nothing out of the request. By the time it runs there is no request yet — decorators fire once, while the controller module is being loaded. All `@Param('id')` does is write down in metadata that argument 0 of `findOne` has to come from the path parameter `id`.
 
-```sh
-curl -s -X POST http://127.0.0.1:3000/users -H 'content-type: application/json' -d '{"email":"not-an-email"}'
-```
-
-## Як це працює
-
-### Метадані типів
-
-Уся «магія» стоїть на двох прапорцях у `tsconfig.json`: `experimentalDecorators` дозволяє синтаксис декораторів, а `emitDecoratorMetadata` змушує компілятор для кожного класу, на якому є хоч один декоратор, згенерувати виклик `Reflect.metadata('design:paramtypes', [...])` зі списком типів параметрів конструктора. Тобто типи, які зазвичай стираються при компіляції, TypeScript зберігає в рантайм-метаданих — але тільки для декорованих класів: клас без `@Injectable()` не отримає `design:paramtypes` навіть з увімкненим прапорцем, бо компілятору нема куди причепити виклик. Сам `Reflect.metadata` — це API полізіфілу `reflect-metadata`, тому `import 'reflect-metadata'` мусить бути найпершим рядком точки входу і тестів: без нього згенеровані виклики просто впадуть. Контейнер у `resolve()` читає ці метадані через `Reflect.getMetadata('design:paramtypes', Target)` і рекурсивно створює кожну залежність. Для інтерфейсів це не працює принципово — інтерфейс у рантаймі не існує, компілятор серіалізує його як `Object` — тому такі параметри позначаються `@Inject(token)`: параметр-декоратор кладе токен у власні метадані класу, і контейнер бере значення, зареєстроване під токеном, замість спроби створити «клас» `Object`.
-
-### Як параметр-декоратор знає, куди підставити значення
-
-Параметр-декоратор нічого не витягує з запиту. У момент його виконання запиту ще не існує — декоратори спрацьовують один раз, коли модуль із контролером тільки завантажується. Усе, що робить `@Param('id')`, — записує в метадані рядок «нульовий аргумент методу `findOne` треба взяти з path-параметра `id`».
-
-Ключем є той самий `parameterIndex`, що TypeScript передає третім аргументом у `(target, propertyKey, parameterIndex)`. Декоратор бере вже накопичену мапу з метаданих класу під ключем методу, дописує в неї свій індекс і кладе назад:
+The key is `parameterIndex`, the third argument TypeScript hands to `(target, propertyKey, parameterIndex)`. The decorator takes the map already accumulated in the class metadata under the method key, adds its own index to it and puts it back:
 
 ```ts
 params[parameterIndex] = { type, name }
 Reflect.defineMetadata(PARAMS_KEY, params, target.constructor, propertyKey)
 ```
 
-Тут важлива деталь: `target` для параметр-декоратора методу — це прототип класу, а не сам клас, тому мапа зберігається на `target.constructor` і додатково розділяється за `propertyKey`. Інакше два методи одного контролера писали б у спільну мапу і перетирали одне одного.
+One detail matters here. For a parameter decorator on a method `target` is the class prototype, not the class itself, so the map lives on `target.constructor` and is split by `propertyKey` on top of that. Without the split two methods of the same controller would write into one shared map and overwrite each other.
 
-Виходить структура на кшталт `{ 0: { type: 'param', name: 'id' } }` для `findOne` і `{ 0: { type: 'query', name: 'limit' } }` для `findAll`. Роутер під час реєстрації контролера зчитує її разом із маршрутами й кладе в об'єкт маршруту.
+What comes out is `{ 0: { type: 'param', name: 'id' } }` for `findOne` and `{ 0: { type: 'query', name: 'limit' } }` for `findAll`. The router reads that map together with the routes when it registers the controller.
 
-Далі працює диспетчер. Отримавши запит, він знаходить маршрут, і будує масив аргументів довжиною в кількість параметрів методу. Для кожного індексу він дивиться в мапу: немає запису — в аргумент іде `undefined`, є запис — значення береться з відповідного джерела. `param` — з розібраного шляху, `query` — з `url.searchParams`, `body` — з розпарсеного тіла, попередньо пропущеного через pipe валідації. Потім `handler.apply(instance, args)`.
+The dispatcher takes it from there. It matches the route, then builds an argument array as long as the method signature. An index missing from the map gets `undefined`; an index present in it is filled from its source — `param` from the parsed path, `query` from `url.searchParams`, `body` from the parsed JSON body after the validation pipe. Then `handler.apply(instance, args)`.
 
-Порядок виконання декораторів такий: спершу всі параметр-декоратори методу, потім декоратор самого методу, і тільки в кінці декоратор класу. Тому `@Get(':id')` вже застає готову мапу параметрів, а `@Controller('users')` бачить повний список маршрутів. Код на цей порядок не покладається — мапи накопичуються незалежно, а роутер збирає все разом уже після завантаження модуля — але сам порядок зафіксовано окремим тестом у `test/router.test.ts`.
-
-### Склеювання шляху
-
-`@Controller('users')` кладе в метадані класу префікс `/users`, `@Get(':id')` кладе в масив маршрутів запис зі шляхом `/:id`. Роутер склеює їх у `/users/:id` і ріже на сегменти. На запиті він порівнює сегменти позиційно: сегмент із двокрапки забирає значення в `pathParams`, решта мають збігтися буквально.
-
-### Валідація
-
-DTO описується власними декораторами властивостей, без `class-validator`. Кожен декоратор дописує правило в мапу `{ [property]: Rule[] }` у метаданих класу DTO. `ValidationPipe` дивиться на тип аргументу, позначеного `@Body()`, який компілятор поклав у `design:paramtypes` для методу. Якщо в цього типу є правила, pipe спершу перетворює сире тіло на екземпляр класу через власний `plainToInstance`, а вже потім проганяє правила. Крок із перетворенням обов'язковий: правила лежать у метаданих класу, тому перевіряти можна лише екземпляр, а не plain-об'єкт. Заразом `plainToInstance` переносить тільки оголошені в DTO властивості, тому зайві поля з тіла запиту в метод не потрапляють.
-
-Помилка віддається списком `[{ field, constraints }]` для кожного поля, що не пройшло, а не першим полем.
+Decorators execute parameters first, then the method, then the class. The code does not rely on that order, since the maps accumulate independently and the router collects everything after the module has loaded, but `test/router.test.ts` pins the order down anyway.
 
 ## API
 
-### Контейнер
+### Container
 
-- `@Injectable({ scope })` — позначає клас створюваним контейнером; `scope`: `singleton` за замовчуванням, один екземпляр на контейнер, або `transient`, новий на кожен `resolve`.
-- `@Inject(token)` — параметр-декоратор для залежностей, які не виражаються класом; токен — `Symbol` або рядок.
-- `container.register(token, value)` — реєструє значення під токеном.
-- `container.resolve(Class)` — збирає екземпляр із усім графом залежностей; цикл `A -> B -> A` падає з `CircularDependencyError`, у повідомленні — весь ланцюг.
+- `@Injectable({ scope })` — marks a class as constructible by the container. `scope` is `singleton` by default, one instance per container, or `transient`, a new one on every `resolve`.
+- `@Inject(token)` — a parameter decorator for dependencies that no class can stand for, such as interfaces and config objects. The token is a `Symbol` or a string.
+- `container.register(token, value)` — registers a value under a token.
+- `container.resolve(Class)` — builds an instance along with its whole dependency graph. A cycle `A -> B -> A` throws `CircularDependencyError` carrying the full chain.
 
 ### HTTP
 
-- `@Controller(prefix)` — базовий шлях контролера.
-- `@Get(path)`, `@Post(path)` — реєструють маршрут; повний шлях — префікс плюс шлях методу.
-- `@Body()`, `@Param(name)`, `@Query(name)` — джерело значення для аргументу.
-- `new Dispatcher({ controllers, container })` — збирає роутер із метаданих і створює `http.Server` через `createServer()`.
-- Значення `@Param` і `@Query` приводяться до типу з сигнатури методу. Параметр із типом `number` приходить числом, нечислове значення дає `400`.
-- Успішна відповідь: `201` для `POST`, `200` для `GET`, результат серіалізується в JSON.
-- `HttpException`, `NotFoundException`, `BadRequestException`, `ValidationException` мапляться в свій статус і JSON-тіло. Будь-яка інша помилка дає `500`.
+- `@Controller(prefix)` — the base path of a controller.
+- `@Get(path)`, `@Post(path)` — register a route. The full path is the prefix plus the method path.
+- `@Body()`, `@Param(name)`, `@Query(name)` — the source of an argument.
+- `new Dispatcher({ controllers, container })` — collects the router from metadata and creates an `http.Server` through `createServer()`.
+- `@Param` and `@Query` values are coerced to the type declared in the signature. A parameter typed `number` arrives as a number, a non-numeric value answers `400`.
+- On success: `201` for `POST`, `200` for `GET`. The result is serialised to JSON.
+- `HttpException`, `NotFoundException`, `BadRequestException` and `ValidationException` map to their own status and JSON body. Anything else answers `500`.
 
-### Валідація
+### Validation
 
-`IsString`, `IsEmail`, `IsInt`, `Min`, `IsOptional`. Поле без `@IsOptional()` обов'язкове.
-
-## Структура
-
-| Файл | Призначення |
-| --- | --- |
-| `src/decorators/injectable.ts` | `@Injectable()` |
-| `src/decorators/inject.ts` | `@Inject(token)` |
-| `src/decorators/controller.ts` | `@Controller(prefix)` |
-| `src/decorators/methods.ts` | `@Get` / `@Post` |
-| `src/decorators/params.ts` | `@Body` / `@Param` / `@Query` |
-| `src/container.ts` | IoC-контейнер |
-| `src/router.ts` | збір маршрутів із метаданих і пошук збігу |
-| `src/dispatcher.ts` | HTTP-шар поверх `node:http` |
-| `src/pipes/validation.pipe.ts` | pipe валідації DTO |
-| `src/validation/rules.ts` | декоратори правил, `plainToInstance`, `validate` |
-| `src/dto/create-user.dto.ts` | DTO з правилами |
-| `src/errors.ts` | HTTP-винятки |
-| `src/path.ts` | нормалізація і склеювання шляхів |
-| `src/users/`, `src/health/` | демо-контролери і сервіс |
-| `src/server.ts` | точка входу |
-| `test/` | тести на `node:test` |
+`IsString`, `IsEmail`, `IsInt`, `Min`, `IsOptional`. A field without `@IsOptional()` is required. Errors come back as `[{ field, constraints }]` for every field that failed, not just the first one.
