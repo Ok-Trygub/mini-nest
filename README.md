@@ -30,22 +30,16 @@ docker compose run --rm api npm test
 
 ## How a parameter decorator knows where to substitute a value
 
-A parameter decorator pulls nothing out of the request. By the time it runs there is no request yet — decorators fire once, while the controller module is being loaded. All `@Param('id')` does is write down in metadata that argument 0 of `findOne` has to come from the path parameter `id`.
-
-The key is `parameterIndex`, the third argument TypeScript hands to `(target, propertyKey, parameterIndex)`. The decorator takes the map already accumulated in the class metadata under the method key, adds its own index to it and puts it back:
+A parameter decorator pulls nothing out of the request. By the time it runs there is no request yet — decorators fire once, while the controller module is being loaded. All `@Param('id')` does is write down that argument 0 of `findOne` has to come from the path parameter `id`. The key is `parameterIndex`, the third argument TypeScript hands to `(target, propertyKey, parameterIndex)`:
 
 ```ts
 params[parameterIndex] = { type, name }
 Reflect.defineMetadata(PARAMS_KEY, params, target.constructor, propertyKey)
 ```
 
-One detail matters here. For a parameter decorator on a method `target` is the class prototype, not the class itself, so the map lives on `target.constructor` and is split by `propertyKey` on top of that. Without the split two methods of the same controller would write into one shared map and overwrite each other.
+`target` here is the class prototype, not the class itself, so the map lives on `target.constructor` and is split by `propertyKey` on top of that. Without the split two methods of the same controller would write into one shared map and overwrite each other. What comes out is `{ 0: { type: 'param', name: 'id' } }` for `findOne`, and the router picks it up together with the routes.
 
-What comes out is `{ 0: { type: 'param', name: 'id' } }` for `findOne` and `{ 0: { type: 'query', name: 'limit' } }` for `findAll`. The router reads that map together with the routes when it registers the controller.
-
-The dispatcher takes it from there. It matches the route, then builds an argument array as long as the method signature. An index missing from the map gets `undefined`; an index present in it is filled from its source — `param` from the parsed path, `query` from `url.searchParams`, `body` from the parsed JSON body after the validation pipe. Then `handler.apply(instance, args)`.
-
-Decorators execute parameters first, then the method, then the class. The code does not rely on that order, since the maps accumulate independently and the router collects everything after the module has loaded, but `test/router.test.ts` pins the order down anyway.
+The dispatcher then builds an argument array as long as the method signature. An index missing from the map gets `undefined`; an index present in it is filled from its source — `param` from the parsed path, `query` from `url.searchParams`, `body` from the parsed JSON body after the validation pipe. Then `handler.apply(instance, args)`. Decorators execute parameters first, then the method, then the class; the code does not rely on that, but `test/router.test.ts` pins the order down anyway.
 
 ## API
 
