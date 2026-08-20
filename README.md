@@ -2,9 +2,6 @@
 
 A hand-written mini-Nest: an IoC container that reads constructor type metadata and assembles the dependency graph itself, plus decorator-based routing and request validation on top of `node:http`.
 
-- Part 1 of 3 — lecture 6, the IoC container.
-- Part 2 of 3 — lecture 7, the HTTP layer.
-
 No third-party HTTP framework: the routing is our own, straight on `node:http`. Exactly one runtime dependency, `reflect-metadata`. Tests run on the built-in Node runner.
 
 ## Getting started
