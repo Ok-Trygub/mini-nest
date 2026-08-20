@@ -31,6 +31,13 @@ export class BadRequestException extends HttpException {
   }
 }
 
+export class ForbiddenException extends HttpException {
+  constructor(message: string) {
+    super(403, message)
+    this.name = 'ForbiddenException'
+  }
+}
+
 export class ValidationException extends HttpException {
   constructor(readonly errors: ValidationFailure[]) {
     super(400, 'Validation failed')

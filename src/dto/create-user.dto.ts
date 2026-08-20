@@ -1,14 +1,15 @@
-import { IsEmail, IsInt, IsOptional, IsString, Min } from '../validation/rules'
+import { z } from 'zod'
+
+export const createUserSchema = z.object({
+  name: z.string().min(1),
+  email: z.email(),
+  age: z.number().int().min(18).optional(),
+})
 
 export class CreateUserDto {
-  @IsString()
-  name!: string
+  static readonly schema = createUserSchema
 
-  @IsEmail()
-  email!: string
-
-  @IsOptional()
-  @IsInt()
-  @Min(18)
-  age?: number
+  declare name: string
+  declare email: string
+  declare age?: number
 }

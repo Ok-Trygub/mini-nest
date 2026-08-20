@@ -76,13 +76,11 @@ describe('HTTP dispatcher', () => {
     assert.deepEqual(JSON.parse(text), {
       statusCode: 400,
       message: 'Validation failed',
-      errors: [
-        { field: 'email', constraints: ['email must be a valid email address'] },
-      ],
+      errors: [{ field: 'email', constraints: ['Invalid email address'] }],
     })
   })
 
-  it('passes a valid body to the handler as an instance of the DTO class', async () => {
+  it('passes a valid body to the handler already parsed by the schema', async () => {
     const response = await fetch(`${baseUrl}/users`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -96,7 +94,11 @@ describe('HTTP dispatcher', () => {
       email: 'ada@example.com',
       age: 36,
     })
-    assert.ok(received.body instanceof CreateUserDto)
+    assert.deepEqual(received.body, {
+      name: 'Ada',
+      email: 'ada@example.com',
+      age: 36,
+    })
   })
 
   it('substitutes @Param into the handler argument', async () => {
